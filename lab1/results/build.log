@@ -1,0 +1,2 @@
+g++ -O1 -std=c++11 -Wall -Wextra -Wno-unknown-pragmas src/solver.cpp -o serial -lm
+g++ -O1 -std=c++11 -Wall -Wextra -Wno-unknown-pragmas -fopenmp src/solver.cpp -o openmp -lm

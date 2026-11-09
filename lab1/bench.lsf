@@ -1,0 +1,82 @@
+#!/bin/bash
+#BSUB -J lab15_cpp_O1
+#BSUB -q normal
+#BSUB -n 20
+#BSUB -x
+#BSUB -R span[hosts=1]
+#BSUB -W 00:40
+#BSUB -o results/bench.%J.out
+#BSUB -e results/bench.%J.err
+set -euo pipefail
+export LC_ALL=C
+export OMP_DYNAMIC=FALSE
+unset OMP_PLACES OMP_PROC_BIND || true
+mkdir -p results/snapshots
+make -B all > results/build.log 2>&1
+sha256sum src/solver.cpp Makefile > results/source.sha256
+# Interleave physical cores between sockets; then take a second SMT lane.
+AFFINITY=$(python - <<'PY'
+import subprocess,collections,sys
+cores=collections.defaultdict(list)
+for line in subprocess.check_output(['lscpu','-p=CPU,CORE,SOCKET']).decode().splitlines():
+    if line.startswith('#'):continue
+    cpu,core,socket=map(int,line.split(','));cores[(socket,core)].append(cpu)
+sockets=sorted(set(k[0] for k in cores))
+per_socket=[[k for k in sorted(cores) if k[0]==s] for s in sockets]
+order=[part[i] for i in range(max(map(len,per_socket))) for part in per_socket if i<len(part)]
+if len(order)<16:raise RuntimeError('Need at least 16 physical cores')
+chosen=order[:16]
+if any(len(cores[k])<2 for k in chosen):raise RuntimeError('Need two SMT lanes')
+sys.stdout.write(' '.join(str(cores[k][lane]) for lane in [0,1] for k in chosen))
+PY
+)
+read -ra CPUS <<< "$AFFINITY"
+FIRST_CPU=${CPUS[0]}
+affinity() { local n=$1; echo "${CPUS[*]:0:n}"; }
+{
+    date -Iseconds
+    hostname
+    g++ --version | head -1
+    lscpu
+    echo "AFFINITY=$AFFINITY"
+    echo "LSB_JOBID=${LSB_JOBID:-unknown}"
+    echo "OMP_DYNAMIC=$OMP_DYNAMIC"
+} > results/environment.txt
+GOMP_CPU_AFFINITY="$AFFINITY" make test > results/tests.log 2>&1
+HEADER='mode,M,N,threads,iterations,seconds,step_norm,relative_residual,solution_norm,functional,restarts,converged,sine_error_l2,sine_error_max,epsilon,manufactured'
+echo "$HEADER" > results/main_raw.csv
+echo "$HEADER" > results/openmp_large_raw.csv
+echo "$HEADER" > results/checks.csv
+for n in 20 40 80; do
+    taskset -c "$FIRST_CPU" ./serial "$n" "$n" 1e-9 - - >/dev/null
+    for repeat in 1 2 3 4 5; do
+        taskset -c "$FIRST_CPU" ./serial "$n" "$n" 1e-9 - - >> results/main_raw.csv
+    done
+    taskset -c "$FIRST_CPU" ./serial "$n" "$n" 1e-12 "results/reference_${n}.csv" - >> results/checks.csv
+    if [ "$n" -eq 80 ]; then
+        taskset -c "$FIRST_CPU" ./serial "$n" "$n" 1e-9 "results/solution_${n}.csv" "results/trace_${n}.csv" 0 --reference "results/reference_${n}.csv" --snapshots results/snapshots --snapshot-every 50 >> results/checks.csv
+    else
+        taskset -c "$FIRST_CPU" ./serial "$n" "$n" 1e-9 "results/solution_${n}.csv" "results/trace_${n}.csv" 0 --reference "results/reference_${n}.csv" >> results/checks.csv
+    fi
+    taskset -c "$FIRST_CPU" ./serial "$n" "$n" 1e-11 "results/exact_${n}.csv" "results/exact_trace_${n}.csv" 1 >> results/checks.csv
+done
+for threads in 1 4 16; do
+    export OMP_NUM_THREADS=$threads GOMP_CPU_AFFINITY="$(affinity "$threads")"
+    ./openmp 80 80 1e-9 - - >/dev/null
+    for repeat in 1 2 3 4 5; do ./openmp 80 80 1e-9 - - >> results/main_raw.csv; done
+    ./openmp 80 80 1e-9 "results/solution_openmp_${threads}.csv" - >> results/checks.csv
+done
+for dims in '400 600' '800 1200'; do
+    read -r m n <<< "$dims"
+    taskset -c "$FIRST_CPU" ./serial "$m" "$n" 1e-9 - - >/dev/null
+    for repeat in 1 2 3; do taskset -c "$FIRST_CPU" ./serial "$m" "$n" 1e-9 - - >> results/openmp_large_raw.csv; done
+    if [ "$m" -eq 400 ]; then threads_list='2 4 8 16'; else threads_list='4 8 16 32'; fi
+    for threads in $threads_list; do
+        export OMP_NUM_THREADS=$threads GOMP_CPU_AFFINITY="$(affinity "$threads")"
+        ./openmp "$m" "$n" 1e-9 - - >/dev/null
+        for repeat in 1 2 3; do ./openmp "$m" "$n" 1e-9 - - >> results/openmp_large_raw.csv; done
+    done
+done
+export OMP_NUM_THREADS=16 GOMP_CPU_AFFINITY="$(affinity 16)"
+./openmp 800 1200 1e-9 results/solution_800_1200.csv - >> results/checks.csv
+echo 'BENCHMARK_COMPLETE'

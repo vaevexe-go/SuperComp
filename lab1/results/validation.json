@@ -1,0 +1,11 @@
+{
+  "openmp_1_max_difference": 0.0,
+  "openmp_4_max_difference": 5.995204332975845e-15,
+  "openmp_16_max_difference": 5.329070518200751e-15,
+  "iter_error_l2_20": 7.60789547438878e-10,
+  "iter_error_max_20": 4.6168749379127405e-10,
+  "iter_error_l2_40": 2.8221802521793417e-09,
+  "iter_error_max_40": 1.8348202401874403e-09,
+  "iter_error_l2_80": 5.541049789942895e-09,
+  "iter_error_max_80": 3.3455890280364997e-09
+}

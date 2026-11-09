@@ -1,0 +1,11 @@
+.DS_Store
+._*
+**/serial
+**/openmp
+**/tests/check
+__pycache__/
+*.pyc
+*.o
+*.aux
+*.toc
+*.synctex.gz

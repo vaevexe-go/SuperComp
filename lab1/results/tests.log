@@ -1,0 +1,6 @@
+g++ -O1 -std=c++11 -Wall -Wextra -Wno-unknown-pragmas -fopenmp tests/check.cpp -o tests/check -lm
+./tests/check
+PASS: analytic area, interior/exterior cells, 300 bounds/additivity checks
+PASS: manufactured solution on 20, 40, 80; second order
+PASS: consistent solutions on 1, 4, 16 threads
+PASS: true-residual convergence, iteration history, monotone functional
